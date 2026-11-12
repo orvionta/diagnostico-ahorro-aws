@@ -1,0 +1,155 @@
+# Orvionta — Rol IAM de solo lectura para el Diagnóstico de ahorro AWS
+#
+# Qué permite: leer la facturación y el inventario de recursos que influyen en el coste
+# (instancias, discos, snapshots, IPs, bases de datos, balanceadores, métricas).
+# Qué NO permite: crear, modificar ni borrar nada; leer el contenido de tus datos
+# (objetos de S3, tablas, bases de datos), secretos, parámetros, variables de entorno
+# de Lambda ni el "user data" de las instancias.
+#
+# Cómo retirar el acceso: borra este stack de CloudFormation (o el rol en IAM).
+# El acceso desaparece en ese momento.
+#
+# Despliegue: CloudFormation > Crear stack > subir este fichero, en la región que quieras
+# (IAM es global). Rellena ConsultantAccountId y ExternalId con los datos que te envío.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Orvionta - rol de solo lectura para el diagnostico de costes AWS (sin acceso a datos)
+
+Parameters:
+  ConsultantAccountId:
+    Type: String
+    AllowedPattern: "^[0-9]{12}$"
+    Description: ID de la cuenta AWS de Orvionta desde la que se asume el rol (te lo envio por correo)
+  ExternalId:
+    Type: String
+    MinLength: 16
+    NoEcho: true
+    Description: Identificador externo unico para tu cuenta (te lo envio por correo)
+  IncludeComputeOptimizer:
+    Type: String
+    AllowedValues: ["no", "si"]
+    Default: "no"
+    Description: Anadir lectura de recomendaciones de Compute Optimizer (solo si ya lo tienes activado)
+
+Conditions:
+  WithComputeOptimizer: !Equals [!Ref IncludeComputeOptimizer, "si"]
+
+Resources:
+  DiagnosticRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Orvionta-Diagnostico-SoloLectura
+      Description: Diagnostico de costes de Orvionta. Solo lectura de facturacion e inventario. Borrar al terminar.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${ConsultantAccountId}:root"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+      Policies:
+        - PolicyName: Facturacion-SoloLectura
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CostesYFacturacion
+                Effect: Allow
+                Action:
+                  - ce:Get*
+                  - ce:Describe*
+                  - ce:List*
+                  - budgets:ViewBudget
+                  - budgets:DescribeBudget*
+                  - cur:DescribeReportDefinitions
+                  - savingsplans:Describe*
+                  - cost-optimization-hub:Get*
+                  - cost-optimization-hub:List*
+                  - pricing:GetProducts
+                  - pricing:DescribeServices
+                  - pricing:GetAttributeValues
+                Resource: "*"
+        - PolicyName: Inventario-SoloLectura
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: InventarioEC2SinUserData
+                Effect: Allow
+                Action:
+                  - ec2:DescribeRegions
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceTypes
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeVolumesModifications
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeImages
+                  - ec2:DescribeAddresses
+                  - ec2:DescribeNatGateways
+                  - ec2:DescribeVpcEndpoints
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeReservedInstances
+                  - ec2:DescribeTags
+                  - autoscaling:DescribeAutoScalingGroups
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetHealth
+                Resource: "*"
+              - Sid: InventarioBasesDeDatosSinDatos
+                Effect: Allow
+                Action:
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBClusters
+                  - rds:DescribeDBSnapshots
+                  - rds:DescribeDBClusterSnapshots
+                  - rds:DescribeReservedDBInstances
+                  - rds:DescribeDBEngineVersions
+                  - rds:ListTagsForResource
+                  - dynamodb:ListTables
+                  - dynamodb:DescribeTable
+                  - elasticache:DescribeCacheClusters
+                  - elasticache:DescribeReservedCacheNodes
+                Resource: "*"
+              - Sid: S3SoloConfiguracionNoObjetos
+                Effect: Allow
+                Action:
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketLocation
+                  - s3:GetBucketTagging
+                  - s3:GetLifecycleConfiguration
+                  - s3:GetIntelligentTieringConfiguration
+                Resource: "*"
+              - Sid: MetricasYLogsSinContenido
+                Effect: Allow
+                Action:
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:ListMetrics
+                  - cloudwatch:DescribeAlarms
+                  - logs:DescribeLogGroups
+                Resource: "*"
+
+  ComputeOptimizerPolicy:
+    Type: AWS::IAM::RolePolicy
+    Condition: WithComputeOptimizer
+    Properties:
+      RoleName: !Ref DiagnosticRole
+      PolicyName: ComputeOptimizer-SoloLectura
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: RecomendacionesComputeOptimizer
+            Effect: Allow
+            Action:
+              - compute-optimizer:GetEnrollmentStatus
+              - compute-optimizer:GetEC2InstanceRecommendations
+              - compute-optimizer:GetEBSVolumeRecommendations
+              - compute-optimizer:GetRDSDatabaseRecommendations
+              - compute-optimizer:GetAutoScalingGroupRecommendations
+            Resource: "*"
+
+Outputs:
+  RoleArn:
+    Description: Envia este ARN a Orvionta para empezar el diagnostico
+    Value: !GetAtt DiagnosticRole.Arn
