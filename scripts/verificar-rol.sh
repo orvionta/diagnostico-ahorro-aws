@@ -46,7 +46,7 @@ simulate() {
     --policy-source-arn "$ROLE_ARN" \
     --action-names "$@" \
     --query 'EvaluationResults[].[EvalActionName,EvalDecision]' \
-    --output text
+    --output text | tr -d '\r'   # la CLI de AWS en Windows termina las líneas en CRLF
 }
 
 fail=0
@@ -54,7 +54,9 @@ echo "Rol: $ROLE_ARN"
 echo
 echo "== Deben estar DENEGADAS =="
 while read -r action decision; do
-  if [[ "$decision" == "allowed" ]]; then
+  decision="${decision%$'\r'}"
+  # Solo cuenta como correcto una denegación explícita o implícita
+  if [[ "$decision" != *Deny ]]; then
     echo "  FALLO  $action -> $decision"; fail=1
   else
     echo "  ok     $action -> $decision"
@@ -64,6 +66,7 @@ done < <(simulate "${DENY[@]}")
 echo
 echo "== Deben estar PERMITIDAS =="
 while read -r action decision; do
+  decision="${decision%$'\r'}"
   if [[ "$decision" != "allowed" ]]; then
     echo "  FALLO  $action -> $decision"; fail=1
   else

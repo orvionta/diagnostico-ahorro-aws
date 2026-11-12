@@ -79,7 +79,18 @@ Una vez desplegado, puedes comprobar que el rol no puede hacer lo que no debe:
 ./scripts/verificar-rol.sh
 ```
 
-El script usa `aws iam simulate-principal-policy` (no ejecuta ninguna acción real) y muestra `allowed` / `implicitDeny` para un conjunto de acciones sensibles (leer objetos de S3, secretos, borrar instancias…). Todas deben salir **denegadas**.
+El script usa `aws iam simulate-principal-policy` (no ejecuta ninguna acción real) y muestra `allowed` / `implicitDeny` para un conjunto de acciones sensibles (leer objetos de S3, secretos, borrar instancias…). Todas deben salir **denegadas**. Funciona en Linux, macOS y Git Bash en Windows.
+
+**Probado el 12-nov-2026** desplegando el rol en una cuenta y asumiéndolo desde otra:
+
+| Prueba | Resultado |
+|--------|-----------|
+| Asumir el rol sin External ID | Denegado |
+| Leer costes (Cost Explorer) e inventario (EBS) | Permitido |
+| Leer un objeto de S3 | `AccessDenied` |
+| Listar secretos (Secrets Manager) | `AccessDenied` |
+| Leer el *user data* de una instancia | `UnauthorizedOperation` |
+| Borrar un volumen o crear un snapshot (*dry-run*) | `UnauthorizedOperation` |
 
 ---
 
